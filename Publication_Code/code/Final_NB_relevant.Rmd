@@ -463,22 +463,19 @@ summary(aov(formula = (Day15 ~ Drought_sev), data = porometer_results_Mat_Line_m
 summary(aov(formula = (Day30 ~ Drought_sev), data = porometer_results_Mat_Line_melted))
 summary(aov(formula = (Day60 ~ Drought_sev), data = porometer_results_Mat_Line_melted))
 
-# Spread of result per IID
-# p_all_overall <- ggplot() + 
-#   geom_violin(data=porometer_results, aes(x=Drought_sev, y=gsw)) +
-#   geom_boxplot(data=porometer_results, aes(x=Drought_sev, y=gsw, colour=as.character(IID), group=IID), position=position_dodge(width=0.75))+
-#   facet_wrap(~Set) +
-#   theme_bw() +
-#   theme(legend.position='none')
+# Median of each IID
+porometer_results_median <- porometer_results_median %>% 
+  filter (!(Set == "Day15"))
+porometer_results_median$Set <- gsub("Day", "Day ", porometer_results_median$Set)
 
 
 sample_sizes <- porometer_results_median %>%
   group_by(Set, Drought_sev) %>%
   summarise(n_count = n(), .groups = 'drop') %>%
   mutate(label_text = paste0("italic(N) == ", n_count),
-         y_pos = c(0.61, 0.4, 0.35, 0.2, 0.17, 0.2, 0.25, 0.2, 0.25))
+         y_pos = c(0.2, 0.17, 0.2, 0.25, 0.2, 0.25))
+         #y_pos = c(0.61, 0.4, 0.35, 0.2, 0.17, 0.2, 0.25, 0.2, 0.25))
 
-# Median of each IID
 porometer_results_median$Drought_sev <- factor(porometer_results_median$Drought_sev, levels = c("Low", "Mid", "High")) # Reorder Sev factor levels
 p_median <- ggplot() + 
   geom_violin(data=porometer_results_median, aes(x=Drought_sev, y=median_gsw)) +
@@ -490,18 +487,7 @@ p_median <- ggplot() +
   scale_x_discrete(labels = c("Low", "Moderate", "High")) +
   geom_text(data = sample_sizes, aes(x = Drought_sev, y = y_pos, label = label_text), color = "grey40", size = 3, parse = TRUE)
 
-
 #ggsave(p_median, file="Figures/Day_Droughtsev_mediangsw.jpg", width = 2500, height = 1500, units = "px", limitsize = F)
-#   
-# tmp <- (porometer_results_median %>% 
-#   group_by(Set, Drought_sev, Mat_Line) %>% 
-#   summarise(mean_median=mean(median_gsw, na.rm=T))) %>% 
-#   group_by(Set, Drought_sev) %>% 
-#   mutate(set_sev_mean=mean(mean_median, na.rm=T))
-
-## Maternal line impact
-#mquin_meta_filt <- mquin_meta %>% select(FID, Lat, Long) %>% unique(); colnames(mquin_meta_filt)[1] <- "Mat_Line"
-#porometer_results_Mat_Line_meta <- left_join(porometer_results, Mat_line_droughttol) 
 
 porometer_results_Mat_Line_meta <- left_join(porometer_results, parent_meta_rel %>% dplyr::select(-c(ID, IID)))  %>% filter(!(Set == "Day15"))
 prec_gsw_aov <- aov(formula = (gsw ~ prec*Drought_sev + Drought_len + Set), data = porometer_results_Mat_Line_meta)
@@ -603,8 +589,8 @@ MR_score_pred_GT <- left_join(MR_score_IID, prediction_gt_droughtexp, by="IID")
 ### Total genotyoped
 nrow(MR_score_GT_pred %>% filter (!is.na(Prediction_IID)))
 ```
+
 ## Basic analyses
-We're not expecting this to be directly correlated, as these should show augmented drought values rather than optimal conditions
 ```{r}
 MR_score_pred_GT$Drought_sev <- gsub("Mid", "Moderate", MR_score_pred_GT$Drought_sev)
 MR_score_pred_GT$Drought_sev <- factor(MR_score_pred_GT$Drought_sev, levels = c("Low", "Moderate", "High"))

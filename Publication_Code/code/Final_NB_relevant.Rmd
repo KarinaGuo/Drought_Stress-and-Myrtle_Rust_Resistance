@@ -3,10 +3,9 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-
 Initiate setwd for all chunks
 ```{r setup, include=FALSE}
-knitr::opts_knit$set(root.dir = "D:/LaptopLenovo_03022026/Uni/Doctorate/Ch2 Stressor/")
+knitr::opts_knit$set(root.dir = "")
 ```
 
 # Meta data
@@ -16,46 +15,27 @@ library(tidyverse); library(readxl); library(patchwork); library(lme4); library(
 
 
 # Meta data
-IID_block <- read_xlsx(path="FID Selection & ID & Randomisation_vers1.xlsx", sheet = 'real_IID_Block_Cell_12tray')
+IID_block <- read_xlsx(path="Data/FID Selection & ID & Randomisation_vers1.xlsx", sheet = 'real_IID_Block_Cell_12tray')
 IID_block_sub <- IID_block %>% 
   select(IID, Mat_Line, Drought_sev, Drought_len, block_cell1, Status)
 
 IID_block_sub$block_cell1 <- as.character(IID_block_sub$block_cell1)
 
 # Maternal line data
-parent_meta <- read.csv ("parent_meta.csv")
+parent_meta <- read.csv ("Data/parent_meta.csv")
 parent_meta_lib <- parent_meta %>% 
   dplyr::select(NSWID, sample_lib_NSW)
-Mat_line_droughttol <- read.csv(file = "D:/LaptopLenovo_03022026/RBGSyd_Technical Officer/MQuin/Seedling GWAS/Filtering/Iteration 6/data/GAPIT_49/prediction_gt.csv")
-colnames(Mat_line_droughttol)[1] <- 'sample_lib_NSW'
-Mat_line_droughttol <- left_join(Mat_line_droughttol, parent_meta_lib) %>% 
-  dplyr::select (NSWID, Prediction)
-colnames(Mat_line_droughttol)[1] <- "Mat_Line"
-
-IID_block_droughtlinetol <- left_join(IID_block_sub, Mat_line_droughttol)
-
-### Adding maternal line local precipitation informed by genetics using climate SNPs  
-parent_meta_lib <- parent_meta %>% 
-  dplyr::select(NSWID, sample_lib_NSW)
-Mat_line_droughttol <- read.csv(file = "D:/LaptopLenovo_03022026/RBGSyd_Technical Officer/MQuin/Seedling GWAS/Filtering/Iteration 6/data/GAPIT_49/prediction_gt.csv")
-colnames(Mat_line_droughttol)[1] <- 'sample_lib_NSW'
-Mat_line_droughttol <- left_join(Mat_line_droughttol, parent_meta_lib) %>% 
-  dplyr::select (NSWID, Prediction)
-colnames(Mat_line_droughttol)[1] <- "Mat_Line"
 
 ### Adding in meanCOI each maternal line
-mquin_meta <- read.csv(file="D:/LaptopLenovo_03022026/RBGSyd_Technical Officer/MQuin/Processing Meta/Mquin_samples_pheno.csv")
+mquin_meta <- read.csv(file="Data/Mquin_samples_pheno.csv")
 Mat_meta <- mquin_meta %>% group_by(FID) %>% summarise(mean_COI=mean(COI, na.rm=T))
 colnames(Mat_meta) <- c("Mat_Line", "mean_COI")
 
-IID_block_matdroughtlinetol <- left_join(IID_block_droughtlinetol, Mat_line_droughttol)
-IID_block_COI <- left_join(IID_block_droughtlinetol, Mat_meta)
-
 # Height-weight data
-height_weight_data <- read.csv(file = "Height_weight_track.csv")
+height_weight_data <- read.csv(file = "Data/Height_weight_track.csv")
 height_weight_data$Date <- as.Date(height_weight_data$Date, format = "%d/%m/%Y")
 height_weight_data$Height..mm. <- as.numeric(height_weight_data$Height..mm.)
-height_weight_data <- left_join(height_weight_data, IID_block_COI)
+height_weight_data <- left_join(height_weight_data, IID_block)
 
 height_weight_data_rmna <- height_weight_data %>% 
   filter(!is.na(Height..mm.))
@@ -67,19 +47,40 @@ Exp_Mat_Line <- unique(IID_block$Mat_Line)
 parent_meta_rel <- parent_meta %>% filter (NSWID %in% Exp_Mat_Line); colnames(parent_meta_rel)[2] <- "Mat_Line"
 parent_meta_rel <- left_join(parent_meta_rel, Mat_meta)
 
+# worldclim_country("Australia", var="prec", path="~/Delete", res=0.5)
+mnth_avg_prec <- raster::stack("Data/AUS_wc2.1_30s_prec.tif")
+
+clim_res=NULL
+for (i in 1:nrow(parent_meta_rel)){
+  site=parent_meta_rel[i, "Pop"]
+  lat=as.numeric(parent_meta_rel[i, "latitude"]); long=as.numeric(parent_meta_rel[i, "longitude"]) 
+  prec = sum(raster::extract(mnth_avg_prec, cbind(long, lat)))
+  clim_res <- as.data.frame(rbind(clim_res, cbind(Pop=site, longitude=as.numeric(long), latitude=as.numeric(lat), prec=prec)))
+}
+remove(mnth_avg_prec)
+
+clim_res$longitude <- as.numeric(clim_res$longitude); clim_res$latitude <- as.numeric(clim_res$latitude)
+
+parent_meta_rel <- unique(left_join(parent_meta_rel, clim_res)); parent_meta_rel$prec <- as.numeric(parent_meta_rel$prec)
+IID_block <- left_join(IID_block, parent_meta_rel %>% dplyr::select(Mat_Line, mean_COI, longitude, latitude))
+###
+```
+
+```{r}
 ### Plotting
 min_lat <- min(parent_meta_rel$latitude, na.rm=T)
 max_lat <- max(parent_meta_rel$latitude, na.rm=T)
 min_long <- min(parent_meta_rel$longitude, na.rm=T)
 max_long <- max(parent_meta_rel$longitude, na.rm=T)
-bbox <- ext(min_long, max_long, min_lat, max_lat)
+bbox <- raster::extent(min_long, max_long, min_lat, max_lat)
 ###########################
 # Install required packages if not already
 
 # Download WorldClim bioclimatic variables (10 minutes resolution)
-#clim <- geodata::worldclim_country(country = "Australia", var="prec", path="~/", res=2.5)
+clim <- raster::stack("Data/AUS_wc2.1_30s_prec.tif")
 annual_prec <- sum(clim)
 annual_prec_NSW <- crop(annual_prec, bbox); annual_prec_NSW <- trim(annual_prec_NSW)
+annual_prec_Spat <- terra::rast(annual_prec_NSW)
 
 cities <- data.frame(
   city = c("Newcastle", "Port Macquarie", "Coffs Harbour"),
@@ -89,7 +90,7 @@ cities <- data.frame(
 
 Mat_Line_NSW_Plot <- ggplot() +
   #xlim(c(min_long, max_long)) + ylim(c(min_lat, max_lat)) +
-  geom_spatraster(data=annual_prec_NSW) +
+  tidyterra::geom_spatraster(data=annual_prec_Spat) +
   geom_point(data = cities, aes(x = lon, y = lat), size = 1, shape = 24, colour = "grey20") +
   geom_text(data = cities, aes(x = lon + 0.1, y = lat, label = city), colour = "grey40", size = 2, hjust = 0) +
   geom_point(data=parent_meta_rel,aes(y=latitude, x=longitude), size = 3, colour="black") +
@@ -101,7 +102,7 @@ Mat_Line_NSW_Plot <- ggplot() +
   guides(fill=guide_legend(title="Mean annual \nprecipitation (mm)"), colour=guide_legend(title="Mean COI")) +
   theme_bw()
 
-#ggsave(Mat_Line_NSW_Plot, filename="Publication/Figures/Mat_Line_NSW_Plot_SI.jpg", unit='px', width = 1500, height = 2000, limitsize=F)
+ggsave(Mat_Line_NSW_Plot, filename="Figures/Mat_Line_NSW_Plot_SI.jpg", unit='px', width = 1500, height = 2000, limitsize=F)
 ```
 
 
@@ -152,7 +153,7 @@ porometer_results$IID <- as.numeric(porometer_results$IID)
 porometer_results$Drought_sev <- factor(porometer_results$Drought_sev, levels = c("Low", "Mid", "High")) # Reorder Sev factor levels
 
 # Joining data with meta
-porometer_results_IID <- left_join(porometer_results %>% select(-c('Drought_sev')), IID_block_COI, by = c('IID'))
+porometer_results_IID <- left_join(porometer_results %>% select(-c('Drought_sev')), IID_block, by = c('IID'))
 porometer_results_rmed <- porometer_results_IID %>% filter(gsw<c(-0.05))
 porometer_results_IID <- porometer_results_IID %>% filter(gsw>c(-0.05)) #remove impossible results
 
@@ -162,13 +163,14 @@ porometer_results_IID$Drought_len <- as.character(porometer_results_IID$Drought_
 porometer_results <- porometer_results_IID
 
 porometer_results_median <- porometer_results_IID %>%
-  group_by(IID, Set, Mat_Line, Drought_len) %>%
-  summarise(Drought_sev=Drought_sev, `Obs#` = median(as.numeric(`Obs#`)), median_gsw = median(gsw, na.rm=T), Time=median(Time, na.rm=T)) %>% 
-  unique()
+  group_by(IID, Set, Mat_Line, Drought_len, Drought_sev) %>%
+  summarise(`Obs#` = median(as.numeric(`Obs#`)), median_gsw = median(gsw, na.rm=T), Time=median(Time, na.rm=T)) %>% 
+  unique() %>% 
+  ungroup()
 
 porometer_results_Mat_Line <- porometer_results_median %>%
   group_by(Set, Mat_Line, Drought_sev, Drought_len) %>%
-  summarise(Drought_sev=Drought_sev, levelmean_gsw = mean(median_gsw)) %>% 
+  summarise(levelmean_gsw = mean(median_gsw)) %>% 
   unique()
 
 porometer_results_Mat_Line_melted <- porometer_results_Mat_Line %>%
@@ -178,12 +180,12 @@ porometer_results_Mat_Line_melted <- porometer_results_Mat_Line %>%
 ```{r Inoculation data prep}
 ## Inoculation One
 # Inoculation data
-MR_score_D30 <- read_xlsx("D:/LaptopLenovo_03022026/Uni/Doctorate/Ch2 Stressor/Scoring/MR_Scoring_D30.xlsx", sheet = "Sheet2") %>% mutate(Drought_len="30")
-MR_score_D60 <- read_xlsx("D:/LaptopLenovo_03022026/Uni/Doctorate/Ch2 Stressor/Scoring/MR_Scoring_D60.xlsx", sheet = "Sheet2") %>% mutate(Drought_len="60")
+MR_score_D30 <- read_xlsx("Scoring/MR_Scoring_D30.xlsx", sheet = "Sheet2") %>% mutate(Drought_len="30")
+MR_score_D60 <- read_xlsx("Scoring/MR_Scoring_D60.xlsx", sheet = "Sheet2") %>% mutate(Drought_len="60")
 
   # Joining data with the meta data
 MR_score <- rbind(MR_score_D30, MR_score_D60)
-MR_score_IID <- left_join(MR_score, IID_block_COI %>% dplyr::select(-Drought_len), by="IID")
+MR_score_IID <- left_join(MR_score, IID_block %>% dplyr::select(-Drought_len), by="IID")
 MR_score_IID$Drought_sev <- factor(MR_score_IID$Drought_sev, levels = c("Low", "Mid", "High")) # Reorder Sev factor levels
 MR_score_IID$Drought_len <- as.character(MR_score_IID$Drought_len)
 
@@ -191,16 +193,16 @@ MR_score_IID$Drought_len <- as.character(MR_score_IID$Drought_len)
 MR_score_porom <- left_join(MR_score_IID, porometer_results_Mat_Line_melted) %>% 
   filter(!is.na(`COI scores`))
 
-MR_score_porom$Diff_COI_meanMat <- MR_score_porom$`COI scores`-MR_score_porom$mean_COI
+#MR_score_porom$Diff_COI_meanMat <- MR_score_porom$`COI scores`-MR_score_porom$mean_COI
 
 ## Inoculation Set Two
 # Reinoculation data 
-MR_score_D30_inoc2 <- read_xlsx("D:/LaptopLenovo_03022026/Uni/Doctorate/Ch2 Stressor/Scoring/MR_Scoring_D30_Inoc2.xlsx", sheet = "Sheet2")
-MR_score_D60_inoc2 <- read_xlsx("D:/LaptopLenovo_03022026/Uni/Doctorate/Ch2 Stressor/Scoring/MR_Scoring_D60_Inoc2.xlsx", sheet = "Sheet2")
+MR_score_D30_inoc2 <- read_xlsx("Scoring/MR_Scoring_D30_Inoc2.xlsx", sheet = "Sheet2")
+MR_score_D60_inoc2 <- read_xlsx("Scoring/MR_Scoring_D60_Inoc2.xlsx", sheet = "Sheet2")
 
   # Joining data with the meta data
 MR_score_inoc2 <- rbind(MR_score_D30_inoc2, MR_score_D60_inoc2)
-MR_score_inoc2 <- left_join(MR_score_inoc2, IID_block_COI)
+MR_score_inoc2 <- left_join(MR_score_inoc2, IID_block)
 MR_score_inoc2$Drought_sev <- factor(MR_score_inoc2$Drought_sev, levels = c("Low", "Mid", "High")) # Reorder Sev factor levels
 MR_score_inoc2$Drought_len <- as.character(MR_score_inoc2$Drought_len)
 
@@ -208,13 +210,13 @@ MR_score_inoc2$Drought_len <- as.character(MR_score_inoc2$Drought_len)
 MR_score_inoc2_porom <- left_join(MR_score_inoc2, porometer_results_Mat_Line_melted) %>% 
   filter(!is.na(`COI scores`))
 
-MR_score_inoc2_porom$Diff_COI <- MR_score_inoc2_porom$`COI scores`-MR_score_inoc2_porom$mean_COI
+#MR_score_inoc2_porom$Diff_COI <- MR_score_inoc2_porom$`COI scores`-MR_score_inoc2_porom$mean_COI
 ```
 
 
 # Script to randomise block
 ```{r eval=FALSE}
-IID_orig <- read.csv("Misc_archive/IID_group_prelim.csv") # Data set for initial IID group allocation
+IID_orig <- read.csv("Data/IID_group_prelim.csv") # Data set for initial IID group allocation
 
 IID_orig_filtBack <- IID_orig %>% filter(!(Type=="Backup"))
 
@@ -267,7 +269,7 @@ final_blocks_ord <- final_blocks_ord[order(final_blocks_ord$block_cell),]
 
 
 ## rand bloc 2 for drought 60
-final_blocks_ord <- read.csv ("C:/Users/swirl/OneDrive/Documents/Uni/Doctorate/Ch2 Stressor/block_order_12tray.csv") # Running again for remaining indivs
+final_blocks_ord <- read.csv ("Data/block_order_12tray.csv") # Running again for remaining indivs
 
 # Drought 60
 final_blocks_ord_filt60 <- final_blocks_ord %>% filter(Drought_len == 60)
@@ -278,14 +280,13 @@ rand_block_ord$block_cell_2 <- as.numeric(rand_block_ord$block_cell)
 
 final_blocks_ord <- left_join(final_blocks_ord, rand_block_ord)
 final_blocks_ord <- final_blocks_ord[order(final_blocks_ord$block_cell),]
-#write.csv(final_blocks_ord, "C:/Users/swirl/OneDrive/Documents/Uni/Doctorate/Ch2 Stressor/block_order_12tray.csv")
 
 
 ######## Which ones to porometer?
 ## Selecting one for each treatment
 
 library(openxlsx)
-final_selection <- read.xlsx("FID Selection & ID & Randomisation_vers1.xlsx", sheet = "real_IID_Block_Cell_12tray")
+final_selection <- read.xlsx("Data/FID Selection & ID & Randomisation_vers1.xlsx", sheet = "real_IID_Block_Cell_12tray")
 final_selection <- final_selection[,1:9]
 
 to_porom=NULL
@@ -307,7 +308,7 @@ for (i in 1:5) {
 # Script to determine height of floral foam (AOW RZSM)
 ```{r}
 library(tidyverse)
-HistoricalRootZoneSoil <- read.csv ("~/Uni/Doctorate/Ch2 Stressor/Publication/Data/AWO_2020-2024_HistoricalRootZoneSoilMoisture_NSW.csv")
+HistoricalRootZoneSoil <- read.csv ("Data/AWO_2020-2024_HistoricalRootZoneSoilMoisture_NSW.csv")
 
 colnames(HistoricalRootZoneSoil) <- HistoricalRootZoneSoil[17,]
 HistoricalRootZoneSoil <- HistoricalRootZoneSoil[-c(1:17),]
@@ -410,20 +411,34 @@ max((count_track_10 %>% dplyr::filter(!(V1==0)))$V1)
 ## Weight
 ```{r Weight}
 # Weight confirmation
-height_weight_data_exp <- height_weight_data %>% 
-  filter(!(Measuring.Purpose == "Pre-experiment"))
-
-summary(aov(data=height_weight_data_exp, formula = Weight..g.~Drought_sev))
+height_weight_data_exp <- height_weight_data 
 
 height_weight_data_exp$Drought_sev <- gsub("Mid", "Moderate", height_weight_data_exp$Drought_sev)
 height_weight_data_exp$Drought_sev <- factor(height_weight_data_exp$Drought_sev, levels = c("Low", "Moderate", "High"))
 
-weight_plot <- ggplot(data=height_weight_data_exp, aes(x=Drought_sev, y=Weight..g.)) +
+height_weight_data_exp$Plot_measure <- ifelse(height_weight_data_exp$Measuring.Purpose == "Pre-experiment", "Before drought", "During drought")
+
+weight_plot <- ggplot(data=height_weight_data_exp, aes(x=Drought_sev, y=Weight..g., fill=Plot_measure)) +
   geom_boxplot() +
   theme_bw() +
   labs (x="Drought severity treatment", y="Weight (g)")
+weight_plot
 
-ggsave(weight_plot, file="Publication/Figures/weight_plot.jpg", width = 1500, height = 1000, units = "px", limitsize = F)
+weight_over_time <- ggplot(data=height_weight_data_exp, aes(x=Date, y=Weight..g., colour=Drought_sev, shape = Plot_measure, group = Drought_sev)) +
+  stat_smooth(method = 'lm', alpha = 0.1, linewidth = 0.75, linetype = "dashed") +
+  geom_vline(xintercept = as.Date("2025-02-02"), linetype = "dashed", color = "firebrick") +
+  geom_vline(xintercept = as.Date("2025-03-03"), linetype = "dashed", color = "firebrick") +
+  geom_point() +
+  theme_bw() +
+  scale_colour_manual(labels = c("Low", "Moderate", "High"), values = c("deepskyblue3", "darkolivegreen3", "darkgoldenrod2")) +
+  scale_shape_manual(values = c(17, 16)) +
+  labs (x="Date", y="Weight (g)", colour = "Drought severity", shape = "Measurement time")
+weight_over_time
+
+summary(aov(data = height_weight_data_exp, formula = Weight..g. ~ Drought_sev + Date))
+summary(aov(data = height_weight_data_exp %>% filter (Measuring.Purpose == "Pre-experiment"), formula = Weight..g. ~ Drought_sev + Date))
+
+ggsave(weight_over_time, file="Figures/weight_plot.jpg", width = 2500, height = 2000, units = "px", limitsize = F)
 ```
 
 ## Analysing Porometer results
@@ -441,8 +456,6 @@ unique_level <- porometer_results %>%
 
 unique_rmed_level$Level_Identifier %in% unique_level$Level_Identifier  # All represented, we good to go!
 ```
-
-
 
 ```{r Porometer results data analysis}
 # Does porometer reading correlate to Drought sev?
@@ -478,7 +491,7 @@ p_median <- ggplot() +
   geom_text(data = sample_sizes, aes(x = Drought_sev, y = y_pos, label = label_text), color = "grey40", size = 3, parse = TRUE)
 
 
-ggsave(p_median, file="D:/LaptopLenovo_03022026/Uni/Doctorate/Ch2 Stressor/Publication/Figures/Day_Droughtsev_mediangsw.jpg", width = 2500, height = 1500, units = "px", limitsize = F)
+#ggsave(p_median, file="Figures/Day_Droughtsev_mediangsw.jpg", width = 2500, height = 1500, units = "px", limitsize = F)
 #   
 # tmp <- (porometer_results_median %>% 
 #   group_by(Set, Drought_sev, Mat_Line) %>% 
@@ -487,12 +500,29 @@ ggsave(p_median, file="D:/LaptopLenovo_03022026/Uni/Doctorate/Ch2 Stressor/Publi
 #   mutate(set_sev_mean=mean(mean_median, na.rm=T))
 
 ## Maternal line impact
-mquin_meta_filt <- mquin_meta %>% select(FID, Lat, Long) %>% unique(); colnames(mquin_meta_filt)[1] <- "Mat_Line"
-porometer_results_Mat_Line_meta <- left_join(porometer_results, Mat_line_droughttol); porometer_results_Mat_Line_meta <- left_join(porometer_results_Mat_Line_meta, mquin_meta_filt)
+#mquin_meta_filt <- mquin_meta %>% select(FID, Lat, Long) %>% unique(); colnames(mquin_meta_filt)[1] <- "Mat_Line"
+#porometer_results_Mat_Line_meta <- left_join(porometer_results, Mat_line_droughttol) 
 
-porometer_results_Mat_Line_meta_median <- left_join(porometer_results_median, mquin_meta_filt)
-lat_gsw_aov <- aov(formula = (median_gsw ~ Lat*Drought_sev + Drought_len), data = porometer_results_Mat_Line_meta_median)
-summary(lat_gsw_aov)
+porometer_results_Mat_Line_meta <- left_join(porometer_results, parent_meta_rel %>% dplyr::select(-c(ID, IID)))  %>% filter(!(Set == "Day15"))
+prec_gsw_aov <- aov(formula = (gsw ~ prec*Drought_sev + Drought_len + Set), data = porometer_results_Mat_Line_meta)
+summary(prec_gsw_aov)
+
+
+porometer_results_Mat_Line_meta_median <- left_join(porometer_results_median, parent_meta_rel %>% dplyr::select(-c(ID, IID))) %>% filter(!(Set == "Day15"))
+
+prec_mediangsw_aov_int <- aov(formula = (median_gsw ~ prec*Drought_sev + Drought_len + Set), data = porometer_results_Mat_Line_meta_median)
+summary(prec_mediangsw_aov_int)
+
+prec_mediangsw_aov <- aov(formula = (median_gsw ~ prec + Drought_sev + Drought_len + Set), data = porometer_results_Mat_Line_meta_median)
+summary(prec_mediangsw_aov)
+
+ggplot(porometer_results_Mat_Line_meta_median, 
+             aes(x = (prec), y = median_gsw, color = factor(Drought_sev))) +
+  geom_point() +
+  stat_summary(fun = mean, geom = "point", size = 3) +
+  stat_summary(fun = mean, geom = "line", aes(group = Drought_sev)) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +
+  facet_wrap(~Drought_len, labeller = label_both)
 
 ## We measured some individuals more than once at the start and end - how do these compare?
 porometer_results_multmeas <- porometer_results %>% 
@@ -501,13 +531,13 @@ porometer_results_multmeas <- porometer_results %>%
   mutate (n=n()) %>% 
   filter (n>5)
 
-ggplot(data=porometer_results_multmeas, aes(x=as.numeric(`Obs#`), y=gsw, colour=Drought_sev)) + 
-  stat_smooth(method='lm', se=F, alpha = 0.8, linetype= 'dashed', linewidth =0.7) +
-  geom_point(position = position_dodge(width=0.75), size=0.75 ) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  #ylim(min(porometer_results$gsw),max(porometer_results$gsw)) +
-  facet_wrap(~IID)
+# ggplot(data=porometer_results_multmeas, aes(x=as.numeric(`Obs#`), y=gsw, colour=Drought_sev)) + 
+#   stat_smooth(method='lm', se=F, alpha = 0.8, linetype= 'dashed', linewidth =0.7) +
+#   geom_point(position = position_dodge(width=0.75), size=0.75 ) +
+#   theme_bw() +
+#   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+#   #ylim(min(porometer_results$gsw),max(porometer_results$gsw)) +
+#   facet_wrap(~IID)
 ```
 
 ```{r Inoculation score_results of difference between BV}
@@ -524,22 +554,7 @@ MR_Droughtsev_Droughtlen_box_split <- ggplot() +
 
 MR_Droughtsev_Droughtlen_box_split
 
-ggsave(MR_Droughtsev_Droughtlen_box_split, file="~/Uni/Doctorate/Ch2 Stressor/Publication/Figures/boxplot_droughtlen_sev.png", width = 8, height = 5)
-
-####
-
-MR_Droughtsev_Droughtlen_box_split_diff <- ggplot() +
-  geom_boxplot(data = MR_score_porom, aes(x = as.factor(mean_COI), y = Diff_COI_meanMat, fill = as.factor(Drought_sev)), linewidth = 0.2, alpha = 0.5, width=0.7) +
-  geom_point(data = MR_score_porom, aes(x = as.factor(mean_COI), y = Diff_COI_meanMat, colour = as.factor(Drought_sev)), alpha = 0.5, ,position = position_jitterdodge( seed=1, dodge.width = 0.75)) +
-  labs(x = "Maternal Line Mean Seedling COI", y = "Post-drought COI - Maternal Line Mean Seedling COI", fill = "Drought Severity", colour = "Drought Severity") +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  scale_x_discrete(labels = function(x) sprintf("%.1f", as.numeric(x)))  + # Round to 1 decimal 
-  scale_fill_manual(labels = c("Low", "Moderate", "High"), values = c("skyblue2", "darkolivegreen2", "goldenrod1")) +
-  scale_colour_manual(labels = c("Low", "Moderate", "High"), values = c("deepskyblue4", "darkolivegreen4", "darkgoldenrod3")) +
-  facet_wrap(~Drought_len, nrow=2)
-
-MR_Droughtsev_Droughtlen_box_split_diff
+ggsave(MR_Droughtsev_Droughtlen_box_split, file="Figures/boxplot_droughtlen_sev.png", width = 8, height = 5)
 ```
 
 
@@ -551,26 +566,27 @@ library(tidyverse); library(readxl); library(logger)
 
 #######################################
 # Genomic prediction
-source("C:/Users/swirl/OneDrive/Documents/Uni/Doctorate/Samples/Genotyping/Code/GP_functs.R")
+source("Code/GP_functs.R")
 
-base_dir="~/Uni/Doctorate/Samples/Genotyping/Report-DMela25-10753/Report-DMela25-10753/"
+base_dir="Genotyping/Report-DMela25-10753/Report-DMela25-10753/"
   
 gt_datafile=paste0(base_dir, "Report-DMela25-10753_trainingconcat_sort.hapmap.hmp.txt")
-input_phenodatafile="~/RBGSyd_Technical Officer/MQuin/Processing Meta/mq_phenotypes.csv"
-out_dir=paste0(base_dir, "GP_Out_rmclimsnps/")
+input_phenodatafile="Data/mq_phenotypes.csv"
+out_dir=paste0(base_dir, "GP_Out_rmclimsnps/Nohomo/")
 log_file=paste0(base_dir, "log_file_withclim_nohomo.txt")
 
-#run_genomic_prediction(gt_datafile = gt_datafile, input_phenodatafile = input_phenodatafile, trans_COI=TRUE, rm_clim_snp=TRUE, homo_site_filt=0.95, miss_site_filt=0.6, homo_samp_filt=0.95, miss_samp_filt=0.9, out_dir = out_dir, log_file = log_file) 2208 SNPs remaining; Y
-
-knitr::opts_knit$set(root.dir = "~/Uni/Doctorate/Ch2 Stressor/")
+run_genomic_prediction(gt_datafile = gt_datafile, input_phenodatafile = input_phenodatafile, trans_COI=TRUE, rm_clim_snp=TRUE, homo_site_filt=1, miss_site_filt=0.6, homo_samp_filt=1, miss_samp_filt=0.9, out_dir = out_dir, log_file = log_file) 
 ```
 
 
 ## Joining against scoring
 ```{r, warning = FALSE}
-prediction_gt <- read.csv("D:/LaptopLenovo_03022026/Uni/Doctorate/Samples/Genotyping/Report-DMela25-10753/Report-DMela25-10753/GP_Out_rmclimsnps/prediction_gt.csv") %>% dplyr::select(c(Taxa, PEV, Prediction))
+base_dir="Genotyping/Report-DMela25-10753/Report-DMela25-10753/"
+
+prediction_gt <- read.csv(paste0(base_dir, "GP_Out_rmclimsnps/Nohomo/prediction_gt.csv")) %>% dplyr::select(c(Taxa, PEV, Prediction))
+
 colnames(prediction_gt)[1] <- "NSWID"
-sample_meta_drought <- read_xlsx("D:/LaptopLenovo_03022026/Uni/Doctorate/Samples/All_samples.xlsx") %>% filter(!is.na(NSWID) & `Genotyping Purpose`=="Drought_experiment") %>% dplyr::select(NSWID, Drought_Exp_ID)
+sample_meta_drought <- read_xlsx("Data/All_samples.xlsx") %>% filter(!is.na(NSWID) & `Genotyping Purpose`=="Drought_experiment") %>% dplyr::select(NSWID, Drought_Exp_ID)
 prediction_gt_droughtexp <- inner_join(prediction_gt, sample_meta_drought, by="NSWID")
 
 ## Removing low reliability predictions
@@ -611,7 +627,7 @@ plot_facet_sev_marg
 
 ## Add images of susceptible and resistant
 
-ggsave(plot_facet_sev_marg, filename="Publication/Figures/GT_GEBV_Droughtsev.jpg", unit='px', width = 2500, height = 2000, limitsize=F)
+#ggsave(plot_facet_sev_marg, filename="Figures/GT_GEBV_Droughtsev.jpg", unit='px', width = 2500, height = 2000, limitsize=F)
 
 plot_facet_mat <- ggplot(MR_score_GT_pred, aes(x=Prediction_IID, y=(`COI scores`)^0.25, colour = Mat_Line)) +
   geom_point() +
@@ -650,7 +666,7 @@ plot_diff <- ggplot() +
   scale_x_discrete(labels = c("Low", "Moderate", "High")) +
   labs(x="Drought severity", y="Coefficient of infection difference")
   
-#ggsave(plot_diff, file="Publication/Figures/Mat_Line_Droughtsev_COIDiff.jpg", width=2500, height=1750, limitsize=F, units="px")
+#ggsave(plot_diff, file="Figures/Mat_Line_Droughtsev_COIDiff.jpg", width=2500, height=1750, limitsize=F, units="px")
 
 
 # B) is it correlated by maternal line?
@@ -663,8 +679,8 @@ plot_diff_facet <- ggplot() +
 
 plot_diff_facet
 
-mquin_meta_filt <- mquin_meta %>% select(FID, Lat, Long) %>% unique(); colnames(mquin_meta_filt)[1] <- "Mat_Line"
-MR_score_GT_pred_rmNA_meta <- left_join(MR_score_GT_pred_rmNA, unique(mquin_meta_filt))
+parent_meta_rel_sub <- parent_meta_rel %>% select(Mat_Line, latitude, longitude, prec) 
+MR_score_GT_pred_rmNA_meta <- left_join(MR_score_GT_pred_rmNA, parent_meta_rel_sub)
 
   # Statistics
 Departure_A <- aov(data = MR_score_GT_pred_rmNA_meta, formula = Difference_pred_IID ~ Mat_Line*Drought_sev + Drought_len);Departure_A
@@ -674,21 +690,23 @@ summary(Departure_A)
 # TukeyHSD(Departure_A, "Mat_Line", ordered = TRUE)
 # ggpubr::ggqqplot(residuals(Departure_A))
 
-# Latitude
-Departure_A_lat_int <- aov(data = MR_score_GT_pred_rmNA_meta, formula = Difference_pred_IID ~ Lat * Drought_sev + Drought_len);Departure_A_lat_int
-summary(Departure_A_lat_int)
+# MAP
+Departure_A_prec_int <- aov(data = MR_score_GT_pred_rmNA_meta, formula = Difference_pred_IID ~ prec * Drought_sev + Drought_len);Departure_A_prec_int
+summary(Departure_A_prec_int)
 
-Departure_A_lat <- aov(data = MR_score_GT_pred_rmNA_meta, formula = Difference_pred_IID ~ Lat + Drought_sev + Drought_len);Departure_A_lat
-summary(Departure_A_lat)
+Departure_A_prec <- aov(data = MR_score_GT_pred_rmNA_meta, formula = Difference_pred_IID ~ prec + Drought_sev + Drought_len);Departure_A_prec
+summary(Departure_A_prec)
 
-Departure_A_raw_Lat_int <- aov(data = MR_score_GT_pred_rmNA_meta, formula = `COI scores`^0.25 ~ Drought_sev * Lat + Drought_len); Departure_A_raw_Lat_int
-summary(Departure_A_raw_Lat_int)
+Departure_A_raw_prec_int <- aov(data = MR_score_GT_pred_rmNA_meta, formula = `COI scores`^0.25 ~ Drought_sev * prec + Drought_len); Departure_A_raw_prec_int
+summary(Departure_A_raw_prec_int)
 
-Departure_A_raw_Lat <- aov(data = MR_score_GT_pred_rmNA_meta, formula = `COI scores`^0.25 ~ Drought_sev + Lat + Drought_len); Departure_A_raw_Lat
-summary(Departure_A_raw_Lat)
+Departure_A_raw_prec <- aov(data = MR_score_GT_pred_rmNA_meta, formula = `COI scores`^0.25 ~ Drought_sev + prec + Drought_len); Departure_A_raw_prec
+summary(Departure_A_raw_prec)
 
-TukeyHSD(Departure_A_raw_Lat, "Drought_sev", ordered = TRUE)
-TukeyHSD(Departure_A_raw_Lat, "Drought_len", ordered = TRUE)
+summary(prec_mediangsw_aov)
+
+TukeyHSD(Departure_A_raw_prec, "Drought_sev", ordered = TRUE)
+TukeyHSD(Departure_A_raw_prec, "Drought_len", ordered = TRUE)
 
 # C) What about A) for Day 30 or 60
 plot_droughtlen <- ggplot() +
@@ -700,13 +718,43 @@ plot_droughtlen
 
 Departure_B <- aov(data = MR_score_GT_pred_rmNA, formula = Difference_pred_IID ~ Drought_sev + Drought_len + Mat_Line)
 summary(Departure_B); TukeyHSD(Departure_B, ordered = TRUE)
+
+Departure_B_raw <- aov(data = MR_score_GT_pred_rmNA, formula = `COI scores`^0.25 ~ Drought_sev + Drought_len + Mat_Line)
+summary(Departure_B_raw); TukeyHSD(Departure_B_raw, ordered = TRUE)
+
 ```
+
+```{r}
+# Residuals 
+
+Excess_res_lat_mat <- aov(data = MR_score_GT_pred_rmNA_meta, formula = Difference_pred_IID ~ Drought_sev + Drought_len + prec + Mat_Line)
+Excess_res_lat <- aov(data = MR_score_GT_pred_rmNA_meta, formula = Difference_pred_IID ~ Drought_sev + Drought_len + prec)
+
+MR_score_GT_pred_rmNA_meta_res <- MR_score_GT_pred_rmNA_meta %>% 
+  filter(!is.na(Difference_pred_IID))
+
+MR_score_GT_pred_rmNA_meta_res$residuals_latmat <- residuals(Excess_res_lat_mat)
+MR_score_GT_pred_rmNA_meta_res$residuals_lat <- residuals(Excess_res_lat)
+
+ggplot(MR_score_GT_pred_rmNA_meta_res, aes(x = prec, y = residuals_latmat)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(title = "LatMat residual")
+
+ggplot(MR_score_GT_pred_rmNA_meta_res, aes(x = prec, y = residuals_lat)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(title = "Lat residual")
+
+```
+
+
 # Reinoculation
 ```{r Reinoculation}
-MR_score_D30 <- read_xlsx("D:/LaptopLenovo_03022026/Uni/Doctorate/Ch2 Stressor/Scoring/MR_Scoring_D30.xlsx", sheet = "Sheet2") %>% mutate(Drought_len="30")
-MR_score_D60 <- read_xlsx("D:/LaptopLenovo_03022026/Uni/Doctorate/Ch2 Stressor/Scoring/MR_Scoring_D60.xlsx", sheet = "Sheet2") %>% mutate(Drought_len="60")
-MR_score_D30_inoc2 <- read_xlsx("D:/LaptopLenovo_03022026/Uni/Doctorate/Ch2 Stressor/Scoring/MR_Scoring_D30_Inoc2.xlsx", sheet = "Sheet2")
-MR_score_D60_inoc2 <- read_xlsx("D:/LaptopLenovo_03022026/Uni/Doctorate/Ch2 Stressor/Scoring/MR_Scoring_D60_Inoc2.xlsx", sheet = "Sheet2")
+MR_score_D30 <- read_xlsx("Scoring/MR_Scoring_D30.xlsx", sheet = "Sheet2") %>% mutate(Drought_len="30")
+MR_score_D60 <- read_xlsx("Scoring/MR_Scoring_D60.xlsx", sheet = "Sheet2") %>% mutate(Drought_len="60")
+MR_score_D30_inoc2 <- read_xlsx("Scoring/MR_Scoring_D30_Inoc2.xlsx", sheet = "Sheet2")
+MR_score_D60_inoc2 <- read_xlsx("Scoring/MR_Scoring_D60_Inoc2.xlsx", sheet = "Sheet2")
 
 # Checking escapees
 MR_score_D30_0 <- MR_score_D30 %>% 
@@ -777,15 +825,13 @@ split_shift_lm <- ggplot() +
 
 split_shift_lm
 
-#ggsave(split_shift_lm, filename="Publication/Figures/Droughted_v_Waterprelete.jpg", unit='px', width = 2000, height = 1500, limitsize=F)
-#ggsave(split_shift_lm, filename="Publication/Figures/Droughted_v_Waterprelete_SI.jpg", unit='px', width = 2000, height = 1500, limitsize=F)
+#ggsave(split_shift_lm, filename="Figures/Droughted_v_Waterprelete.jpg", unit='px', width = 2000, height = 1500, limitsize=F)
+#ggsave(split_shift_lm, filename="Figures/Droughted_v_Waterprelete_SI.jpg", unit='px', width = 2000, height = 1500, limitsize=F)
 
 ## Paired t-test
 ShiftInoc_paired <- t.test(MR_score_reinoc_comp_meta$COI_Scores_Inoc2^0.25, MR_score_reinoc_comp_meta$COI_Scores_Inoc1^0.25, paired=TRUE)
 ShiftInoc_paired
-# 
-# ShiftInoc <- aov(data = MR_score_reinoc_comp_meta, formula = Difference ~ Drought_sev + Drought_len)
-# summary(ShiftInoc)
+ 
 ```
 
 # Comparing against predicted resistance
@@ -796,6 +842,44 @@ MR_score_reinoc_comp_pred <- left_join(MR_score_comp_rmna_rm0inoc1, MR_score_GT_
 MR_score_reinoc_comp_pred$Drought_sev <- gsub("Mid", "Moderate",MR_score_reinoc_comp_pred$Drought_sev)
 MR_score_reinoc_comp_pred$Drought_sev <- factor(MR_score_reinoc_comp_pred$Drought_sev, levels = c("Low", "Moderate", "High"))
 
+
+####
+# No escapees
+MR_score_GT_pred$IID <- as.numeric(MR_score_GT_pred$IID); MR_score_GT_pred$Drought_len <- as.numeric(MR_score_GT_pred$Drought_len)
+MR_score_reinoc_comp_pred_rmescape <- left_join(MR_score_comp_rmna, MR_score_GT_pred) %>% 
+  filter(!is.na(Prediction_IID)) %>% 
+  filter (!(COI_Scores_Inoc1 == 0))
+MR_score_reinoc_comp_pred_rmescape$Drought_sev <- gsub("Mid", "Moderate",MR_score_reinoc_comp_pred_rmescape$Drought_sev)
+MR_score_reinoc_comp_pred_rmescape$Drought_sev <- factor(MR_score_reinoc_comp_pred_rmescape$Drought_sev, levels = c("Low", "Moderate", "High"))
+
+
+plot_COI_Scores_Inoc1 <- 
+  ggplot(data = MR_score_reinoc_comp_pred_rmescape, aes(x=Prediction_IID, y=COI_Scores_Inoc1^0.25)) +
+  theme_bw () + 
+  geom_smooth (method = 'lm', colour="goldenrod", linetype="dashed", linewidth=0.7, se=F) +
+  geom_abline(intercept=0, slope=1, colour="grey", linetype="dashed") +
+  geom_point(alpha=0.5, fill ="black", colour = "transparent", shape = 21) +
+  facet_wrap (~Drought_len * Drought_sev) +
+  labs (x="Genomically Estimated Breeding Value for COI", y=expression("Droughted score (COI)"^0.25))
+
+plot_COI_Scores_Inoc2 <- 
+  ggplot(data = MR_score_reinoc_comp_pred_rmescape, aes(x=Prediction_IID, y=COI_Scores_Inoc2^0.25)) +
+  #ggplot(data = MR_score_reinoc_comp_pred, aes(x=Prediction_IID, y=COI_Scores_Inoc2^0.25)) +
+  theme_bw () + 
+  geom_smooth (method = 'lm', colour="steelblue3", linetype="dashed", linewidth=0.7, se=F) +
+  geom_abline(intercept=0, slope=1, colour="grey", linetype="dashed") +
+  geom_point(alpha=0.5,fill ="black", colour = "transparent", shape = 21) +
+  facet_wrap (~Drought_len * Drought_sev) +
+  labs (x="Genomically Estimated Breeding Value for COI", y=expression("Water replete score (COI)"^0.25)) 
+plot_COI_Scores_Inoc1
+plot_COI_Scores_Inoc2
+#ggsave(plot_COI_Scores_Inoc1, , filename="Figures/GT_GEBV_Reinoc1.jpg", unit='px', width = 1500, height = 1750, limitsize=F)
+#ggsave(plot_COI_Scores_Inoc2, filename="Figures/GT_GEBV_Reinoc2.jpg", unit='px', width = 1500, height = 1750, limitsize=F)
+      
+
+
+####
+
 # Keep escapees for SI
 MR_score_GT_pred$IID <- as.numeric(MR_score_GT_pred$IID); MR_score_GT_pred$Drought_len <- as.numeric(MR_score_GT_pred$Drought_len)
 MR_score_reinoc_comp_pred_keepescape <- left_join(MR_score_comp_rmna, MR_score_GT_pred) %>% 
@@ -805,7 +889,6 @@ MR_score_reinoc_comp_pred_keepescape$Drought_sev <- factor(MR_score_reinoc_comp_
 
 
 plot_COI_Scores_Inoc1 <- 
-  #ggplot(data = MR_score_reinoc_comp_pred, aes(x=Prediction_IID, y=COI_Scores_Inoc1^0.25)) +
   ggplot(data = MR_score_reinoc_comp_pred_keepescape, aes(x=Prediction_IID, y=COI_Scores_Inoc1^0.25)) +
   theme_bw () + 
   geom_smooth (method = 'lm', colour="goldenrod", linetype="dashed", linewidth=0.7, se=F) +
@@ -825,9 +908,12 @@ plot_COI_Scores_Inoc2 <-
   labs (x="Genomically Estimated Breeding Value for COI", y=expression("Water replete score (COI)"^0.25)) 
 plot_COI_Scores_Inoc1
 plot_COI_Scores_Inoc2
-ggsave(plot_COI_Scores_Inoc1, , filename="Publication/Figures/GT_GEBV_Reinoc1_SI.jpg", unit='px', width = 1500, height = 1750, limitsize=F)
-ggsave(plot_COI_Scores_Inoc2, filename="Publication/Figures/GT_GEBV_Reinoc1_SI.jpg", unit='px', width = 1500, height = 1750, limitsize=F)
-       
+#ggsave(plot_COI_Scores_Inoc1, , filename="Figures/GT_GEBV_Reinoc1_SI.jpg", unit='px', width = 1500, height = 1750, limitsize=F)
+#ggsave(plot_COI_Scores_Inoc2, filename="Figures/GT_GEBV_Reinoc2_SI.jpg", unit='px', width = 1500, height = 1750, limitsize=F)
+      
+
+####
+ 
 summary(aov(formula = (COI_Scores_Inoc1^0.25) ~ Prediction_IID + Drought_len + Drought_sev, data=MR_score_reinoc_comp_pred))
 
 # Reshape into long format
@@ -870,9 +956,7 @@ hypothesis_plot <- ggplot(data = hyp_data, aes(x, y)) +
   geom_abline(intercept=0, slope=1, colour="grey", linetype="dashed") +
   #geom_point(alpha=0.3,fill ="black", colour = "transparent", shape = 21) +
   #facet_wrap (~Drought_len * Drought_sev) +
-  labs (x="Coefficient of Infection score using genomic prediction (GEBV)", y="Coefficient of Infection score post-drought treatment")
+  labs (x="Baseline Coefficient of Infection score using genomic prediction (GEBV)", y="Coefficient of Infection score post-drought treatment")
 
-ggsave(hypothesis_plot, filename="Publication/Figures/Hypothesis_plot.jpg", unit='px', width = 1500, height = 1500, limitsize=F)
+#ggsave(hypothesis_plot, filename="Figures/Hypothesis_plot.jpg", unit='px', width = 1500, height = 1500, limitsize=F)
 ```
-
-

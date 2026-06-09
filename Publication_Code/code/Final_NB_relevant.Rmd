@@ -669,12 +669,13 @@ parent_meta_rel_sub <- parent_meta_rel %>% select(Mat_Line, latitude, longitude,
 MR_score_GT_pred_rmNA_meta <- left_join(MR_score_GT_pred_rmNA, parent_meta_rel_sub)
 
   # Statistics
-Departure_A <- aov(data = MR_score_GT_pred_rmNA_meta, formula = Difference_pred_IID ~ Mat_Line*Drought_sev + Drought_len);Departure_A
+Departure_Aint <- aov(data = MR_score_GT_pred_rmNA_meta, formula = Difference_pred_IID ~ Mat_Line*Drought_sev + Drought_len);Departure_A
+summary(Departure_Aint)
+
+Departure_A <- aov(data = MR_score_GT_pred_rmNA_meta, formula = Difference_pred_IID ~ Mat_Line + Drought_sev + Drought_len);Departure_A
 summary(Departure_A)
-# TukeyHSD(Departure_A, "Drought_sev", ordered = TRUE)
-# TukeyHSD(Departure_A, "Drought_len", ordered = TRUE)
-# TukeyHSD(Departure_A, "Mat_Line", ordered = TRUE)
-# ggpubr::ggqqplot(residuals(Departure_A))
+
+
 
 # MAP
 Departure_A_prec_int <- aov(data = MR_score_GT_pred_rmNA_meta, formula = Difference_pred_IID ~ prec * Drought_sev + Drought_len);Departure_A_prec_int
